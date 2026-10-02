@@ -1,0 +1,20 @@
+# Terraform 狀態檔 —— 絕不能進 Git（含明文密碼、資源 ID）
+*.tfstate
+*.tfstate.*
+
+# 本地 lock 檔與 CLI 暫存
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+
+# 變數檔可能含機密；保留範例檔，忽略真實檔
+*.tfvars
+!*.tfvars.example
+
+# 覆蓋率與本機工具產物
+*.tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
