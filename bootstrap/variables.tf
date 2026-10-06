@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "部署區域；遷移環境時只需改 terraform.tfvars"
   type        = string
-  default     = "ap-southeast-2"
+  default     = "ap-east-1"
 }
 
 variable "project" {

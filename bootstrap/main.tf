@@ -2,7 +2,7 @@
 # 任務 4：變數外部化 + locals 統一標籤；state 由 local 遷移至下列 S3 backend
 
 terraform {
-  required_version = ">= 1.10" # 鎖下限，避免舊版語法地雷
+  required_version = ">= 1.11" # 鎖下限；use_lockfile 需 ≥ 1.11
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -14,11 +14,11 @@ terraform {
   # 注意：backend 區塊「不支援變數插值」——這是 Terraform 的著名限制
   #（init 需要先找到 bucket 才能讀 state，而 var 值可能藏在 state 裡，雞生蛋）
   backend "s3" {
-    bucket         = "tf-state-397068653336"       # 帳號 ID 保證全域唯一
-    key            = "bootstrap/terraform.tfstate" # state 在 bucket 內的路徑
-    region         = "ap-southeast-2"
-    dynamodb_table = "terraform-locks" # 併發鎖定
-    encrypt        = true              # 傳輸+靜止加密
+    bucket       = "tf-state-433269483086"       # 帳號 ID 保證全域唯一
+    key          = "bootstrap/terraform.tfstate" # state 在 bucket 內的路徑
+    region       = "ap-east-1"
+    use_lockfile = true                          # S3 原生鎖定（≥1.11），取代 DynamoDB
+    encrypt      = true                          # 傳輸+靜止加密
   }
 }
 
@@ -65,20 +65,6 @@ resource "aws_s3_bucket_public_access_block" "tf_state" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-# ── DynamoDB 鎖定表 ─────────────────────────────
-resource "aws_dynamodb_table" "terraform_locks" {
-  name         = "terraform-locks"
-  billing_mode = "PAY_PER_REQUEST" # 按需計費：鎖操作極少，遠比 provisioned 便宜
-  hash_key     = "LockID"          # Terraform 固定用這個主鍵名稱
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  tags = local.common_tags
 }
 
 data "aws_caller_identity" "current" {} # 動態取得帳號 ID，避免硬編碼
