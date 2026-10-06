@@ -13,5 +13,5 @@ modules/    可重用模組
 
 ## 環境資訊
 - Dev Account ID: &lt;填你的 12 碼 ID&gt;
-- State Bucket: &lt;任務 3 完成後回填&gt;
-- Terraform 版本: &lt;貼上任務 1 記下的版本&gt;
+- State Bucket: tf-state-433269483086
+- Terraform 版本: v1.16.0
