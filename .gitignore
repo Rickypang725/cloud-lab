@@ -14,6 +14,7 @@ crash.*.log
 
 # 覆蓋率與本機工具產物
 *.tfplan
+*.plan
 override.tf
 override.tf.json
 *_override.tf
