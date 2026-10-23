@@ -68,3 +68,33 @@ resource "aws_subnet" "public" {
     Tier        = "public"   # 將來用 tag 過濾/審計 public 暴露面
   }
 }
+
+# ============================================================
+# 任務 4：Public Route Table —— 建表 + 預設路由 + 關聯子網
+# ============================================================
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.this.id
+
+  # 刻意不用 inline route {} block：inline 在增刪條目時會觸發
+  # 整張 RT destroy/recreate；獨立 aws_route 只做條目級變更
+  tags = {
+    Name        = "cloudlab-dev-rt-public"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "task-4"
+  }
+}
+
+resource "aws_route" "public_internet" {
+  route_table_id = aws_route_table.public.id
+  # /0 = 預設路由；最長前綴優先保證 10.0.0.0/16 內流量不被攔截
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.main.id
+}
+
+# RT 建好≠生效：關聯到子網才算接管路由
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id        # 任務 3：subnet-0924ed54981f484b9
+  route_table_id = aws_route_table.public.id
+}
