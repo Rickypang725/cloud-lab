@@ -98,3 +98,49 @@ resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id        # 任務 3：subnet-0924ed54981f484b9
   route_table_id = aws_route_table.public.id
 }
+
+# ============================================================
+# 任務 5：Security Group —— 僅建 SG 與規則，EC2 下半場再掛
+# ============================================================
+resource "aws_security_group" "public_ec2" {
+  name        = "cloudlab-dev-sg-public-ec2"
+  description = "Public EC2: SSH from admin only"
+  vpc_id      = aws_vpc.this.id   # SG 是 VPC 層資源，跨 VPC 不可引用
+
+  tags = {
+    Name        = "cloudlab-dev-sg-public-ec2"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "task-5"
+  }
+}
+
+# SSH 入向：只信管理端
+# 獨立 aws_security_group_rule 資源，理由同 route：
+# inline 規則在變更時會觸發整個 SG destroy/recreate
+resource "aws_security_group_rule" "ssh_ingress" {
+  type              = "ingress"
+  security_group_id = aws_security_group.public_ec2.id
+  protocol          = "tcp"
+  from_port         = 22
+  to_port           = 22
+  cidr_blocks       = [var.admin_cidr]   # 例如 ["203.0.113.7/32"]
+  description       = "SSH from admin workstation"
+}
+
+# 出向：dev 階段維持全放行（更新套件、curl 驗證都靠它）。
+# 顯式宣告而非依賴預設，是為了讓「放行了什麼」出現在 plan 裡可審計
+resource "aws_security_group_rule" "egress_all" {
+  type              = "egress"
+  security_group_id = aws_security_group.public_ec2.id
+  protocol          = "-1"               # -1 = all protocols（ICMP/TCP/UDP 全含）
+  from_port         = 0
+  to_port           = 0
+  cidr_blocks       = ["0.0.0.0/0"]
+  description       = "Allow all outbound (dev stage)"
+}
+
+output "sg_public_ec2_id" {
+  description = "SG ID，EC2 任務掛載時引用"
+  value       = aws_security_group.public_ec2.id
+}

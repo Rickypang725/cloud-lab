@@ -29,4 +29,5 @@ module "vpc" {
     Environment = "dev"
     ManagedBy   = "terraform"
   }
+  admin_cidr = var.admin_cidr   # 把 root 收到的值遞進子模組
 }
