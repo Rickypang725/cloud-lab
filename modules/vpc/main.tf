@@ -51,7 +51,7 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-resource "aws_subnet" "public" {
+resource "aws_subnet" "public_a" {
   vpc_id     = aws_vpc.this.id
   cidr_block = "10.0.1.0/24"   # 從 VPC CIDR 切出；/24 = 256 地址、5 個 AWS 保留
 
@@ -95,7 +95,7 @@ resource "aws_route" "public_internet" {
 
 # RT 建好≠生效：關聯到子網才算接管路由
 resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id        # 任務 3：subnet-0924ed54981f484b9
+  subnet_id      = aws_subnet.public_a.id        # 任務 3：subnet-0924ed54981f484b9
   route_table_id = aws_route_table.public.id
 }
 
@@ -173,12 +173,12 @@ resource "aws_instance" "app" {
   ami           = data.aws_ami.amazon_linux.id
   instance_type = var.instance_type
   key_name      = aws_key_pair.admin.key_name
-  subnet_id     = aws_subnet.public.id              # 任務 3
+  subnet_id     = aws_subnet.public_a.id              # 任務 3
   vpc_security_group_ids = [aws_security_group.public_ec2.id]  # 上半場
   # 子網已設 auto-assign public IP；此處再顯式寫一次，
   # 讓「這台機器有公網 IP」出現在 plan 屬性裡可審計
   associate_public_ip_address = true
-  
+
   # data source 選出的 AMI 在實例建成後不再有意義：
   # 重建實例只為換 AMI 不是 dev 階段想要的行为，
   # AMI 更新應由明確的管線決策觸發（改變數/篩選條件），而非 plan 的隨機性
