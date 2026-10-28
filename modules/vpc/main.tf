@@ -144,3 +144,57 @@ output "sg_public_ec2_id" {
   description = "SG ID，EC2 任務掛載時引用"
   value       = aws_security_group.public_ec2.id
 }
+
+# ============================================================
+# 任務 5 下半場：Key Pair + EC2 —— 納管運算資源
+# ============================================================
+
+resource "aws_key_pair" "admin" {
+  key_name   = "cloudlab-dev-admin"
+  public_key = file(var.admin_public_key_path)   # 只收公鑰；私鑰永不入庫
+  tags       = { Name = "cloudlab-dev-admin", Task = "task-5" }
+}
+
+# 動態選最新 Amazon Linux 2023，不硬編碼 AMI ID
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]                # 只信官方帳號的映像
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"] # 鎖定 AL2023 正式版命名
+  }
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+resource "aws_instance" "app" {
+  ami           = data.aws_ami.amazon_linux.id
+  instance_type = var.instance_type
+  key_name      = aws_key_pair.admin.key_name
+  subnet_id     = aws_subnet.public.id              # 任務 3
+  vpc_security_group_ids = [aws_security_group.public_ec2.id]  # 上半場
+  # 子網已設 auto-assign public IP；此處再顯式寫一次，
+  # 讓「這台機器有公網 IP」出現在 plan 屬性裡可審計
+  associate_public_ip_address = true
+  
+  # data source 選出的 AMI 在實例建成後不再有意義：
+  # 重建實例只為換 AMI 不是 dev 階段想要的行为，
+  # AMI 更新應由明確的管線決策觸發（改變數/篩選條件），而非 plan 的隨機性
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
+  tags = {
+    Name        = "cloudlab-dev-ec2-app"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "task-5"
+  }
+}
+
+output "ec2_app_public_ip" {
+  description = "SSH 目標；ssh -i ~/.ssh/cloudlab-dev ec2-user@<此 IP>"
+  value       = aws_instance.app.public_ip
+}
