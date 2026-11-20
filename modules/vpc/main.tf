@@ -216,3 +216,44 @@ resource "aws_subnet" "private_a" {
     Tier        = "private"   # 與 public 子網同規則：用 tag 過濾/審計
   }
 }
+
+# ============================================================
+# 任務 M1.2a：Private Route Table —— 空表，只為承接 gateway endpoint 路由
+# ============================================================
+# 為什麼不在 default main RT 上掛 endpoint：
+# repo 紀律「不動預設 main route table」。建獨立表 = 讓「private 子網的路由」
+# 出現在 plan 裡可審計，也為 M2 Fargate 的網路面打好結構。
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.this.id
+  # 刻意不放任何 aws_route：private 子網無出網需求（無 NAT、無 IGW）
+  tags = {
+    Name        = "cloudlab-dev-rt-private"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "m1-2"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+  subnet_id      = aws_subnet.private_a.id
+  route_table_id = aws_route_table.private.id
+}
+
+# ============================================================
+# 任務 M1.2b：S3 Gateway Endpoint —— 免費，AWS 官方案例的頭號省錢項
+# ============================================================
+# Gateway endpoint 只支援 S3/DynamoDB，完全免費（無小時費、無每 GB 費），
+# 機制是路由表條目指向 prefix list（pl-xxx），不是 PrivateLink ENI。
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.this.id
+  service_name      = "com.amazonaws.ap-east-1.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.private.id]
+
+  tags = {
+    Name        = "cloudlab-dev-vpce-s3"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "m1-2"
+  }
+}
