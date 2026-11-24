@@ -198,3 +198,137 @@ output "ec2_app_public_ip" {
   description = "SSH 目標；ssh -i ~/.ssh/cloudlab-dev ec2-user@<此 IP>"
   value       = aws_instance.app.public_ip
 }
+
+# ============================================================
+# 任務 M1.1：Private Subnet —— 無 IGW 路由，預設封閉
+# ============================================================
+resource "aws_subnet" "private_a" {
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = "10.0.2.0/24"   # 地址規劃：Task 1 已預留
+  availability_zone       = data.aws_availability_zones.available.names[0]
+  map_public_ip_on_launch = false           # 與 public 子網相反，顯式寫出可審計 #可以不建Route Table，子網回落到DeFault Route Table，沒有IGW路由，無法上網
+
+  tags = {
+    Name        = "cloudlab-dev-subnet-private"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "m1-1"
+    Tier        = "private"   # 與 public 子網同規則：用 tag 過濾/審計
+  }
+}
+
+# ============================================================
+# 任務 M1.2a：Private Route Table —— 空表，只為承接 gateway endpoint 路由
+# ============================================================
+# 為什麼不在 default main RT 上掛 endpoint：
+# repo 紀律「不動預設 main route table」。建獨立表 = 讓「private 子網的路由」
+# 出現在 plan 裡可審計，也為 M2 Fargate 的網路面打好結構。
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.this.id
+  # 刻意不放任何 aws_route：private 子網無出網需求（無 NAT、無 IGW）
+  tags = {
+    Name        = "cloudlab-dev-rt-private"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "m1-2"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+  subnet_id      = aws_subnet.private_a.id
+  route_table_id = aws_route_table.private.id
+}
+
+# ============================================================
+# 任務 M1.2b：S3 Gateway Endpoint —— 免費，AWS 官方案例的頭號省錢項
+# ============================================================
+# Gateway endpoint 只支援 S3/DynamoDB，完全免費（無小時費、無每 GB 費），
+# 機制是路由表條目指向 prefix list（pl-xxx），不是 PrivateLink ENI。
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.this.id
+  service_name      = "com.amazonaws.ap-east-1.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.private.id]
+
+  tags = {
+    Name        = "cloudlab-dev-vpce-s3"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "m1-2"
+  }
+}
+
+# ============================================================
+# 任務 M1.3a：Endpoint Security Group —— 443 只從 VPC 內部
+# ============================================================
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "cloudlab-dev-sg-vpc-endpoints"
+  description = "Interface endpoints: HTTPS from VPC CIDR only"
+  vpc_id      = aws_vpc.this.id
+
+  tags = {
+    Name        = "cloudlab-dev-sg-vpc-endpoints"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "m1-3"
+  }
+}
+
+resource "aws_security_group_rule" "endpoints_ingress" {
+  type              = "ingress"
+  security_group_id = aws_security_group.vpc_endpoints.id
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_blocks       = [var.cidr_block]   # 遞進 root 的 10.0.0.0/16；M2 可換成 SG-to-SG
+  description       = "HTTPS from within VPC"
+}
+
+# ============================================================
+# 任務 M1.3b：三個 Interface Endpoints
+# ============================================================
+# 為什麼是這三個：Fargate 拉映像檔走 ECR api（授權/token）+ ECR dkr（映像層，
+# 實際傳輸在 S3，所以 M1.2 的 S3 gateway endpoint 是必要搭配）；
+# 容器日誌走 CloudWatch Logs。合起來 = Fargate 在 private subnet 的
+# 「無 NAT 最小閉環」。
+#
+# 成本意識（講得出數字）：
+# - Gateway（S3）：完全免費
+# - Interface：約 US$0.01/AZ-小時（≈US$7.30/AZ-月）+ 約 US$0.01/GB 處理費
+#   → 3 個 × 1 AZ ≈ US$22/月；對 NAT（ap-east-1 ≈US$45/月 + US$0.045/GB）仍便宜，
+#     且 interface endpoint 每 GB 處理費比 NAT 便宜約 78%
+# - 單 AZ 是成本取捨：AWS 建議 ≥2 AZ（AZ 掛了該 zone 的資源失去服務存取），
+#   dev/lab 接受此風險，寫在這裡當決策痕跡
+
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.ap-east-1.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true   # 必開：讓服務公網 DNS 在 VPC 內解析到 endpoint ENI 的私網 IP
+
+  tags = { Name = "cloudlab-dev-vpce-ecr-api", Task = "m1-3" }
+}
+
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.ap-east-1.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = { Name = "cloudlab-dev-vpce-ecr-dkr", Task = "m1-3" }
+}
+
+resource "aws_vpc_endpoint" "logs" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.ap-east-1.logs"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = { Name = "cloudlab-dev-vpce-logs", Task = "m1-3" }
+}
