@@ -257,3 +257,78 @@ resource "aws_vpc_endpoint" "s3" {
     Task        = "m1-2"
   }
 }
+
+# ============================================================
+# 任務 M1.3a：Endpoint Security Group —— 443 只從 VPC 內部
+# ============================================================
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "cloudlab-dev-sg-vpc-endpoints"
+  description = "Interface endpoints: HTTPS from VPC CIDR only"
+  vpc_id      = aws_vpc.this.id
+
+  tags = {
+    Name        = "cloudlab-dev-sg-vpc-endpoints"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+    Task        = "m1-3"
+  }
+}
+
+resource "aws_security_group_rule" "endpoints_ingress" {
+  type              = "ingress"
+  security_group_id = aws_security_group.vpc_endpoints.id
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_blocks       = [var.cidr_block]   # 遞進 root 的 10.0.0.0/16；M2 可換成 SG-to-SG
+  description       = "HTTPS from within VPC"
+}
+
+# ============================================================
+# 任務 M1.3b：三個 Interface Endpoints
+# ============================================================
+# 為什麼是這三個：Fargate 拉映像檔走 ECR api（授權/token）+ ECR dkr（映像層，
+# 實際傳輸在 S3，所以 M1.2 的 S3 gateway endpoint 是必要搭配）；
+# 容器日誌走 CloudWatch Logs。合起來 = Fargate 在 private subnet 的
+# 「無 NAT 最小閉環」。
+#
+# 成本意識（講得出數字）：
+# - Gateway（S3）：完全免費
+# - Interface：約 US$0.01/AZ-小時（≈US$7.30/AZ-月）+ 約 US$0.01/GB 處理費
+#   → 3 個 × 1 AZ ≈ US$22/月；對 NAT（ap-east-1 ≈US$45/月 + US$0.045/GB）仍便宜，
+#     且 interface endpoint 每 GB 處理費比 NAT 便宜約 78%
+# - 單 AZ 是成本取捨：AWS 建議 ≥2 AZ（AZ 掛了該 zone 的資源失去服務存取），
+#   dev/lab 接受此風險，寫在這裡當決策痕跡
+
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.ap-east-1.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true   # 必開：讓服務公網 DNS 在 VPC 內解析到 endpoint ENI 的私網 IP
+
+  tags = { Name = "cloudlab-dev-vpce-ecr-api", Task = "m1-3" }
+}
+
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.ap-east-1.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = { Name = "cloudlab-dev-vpce-ecr-dkr", Task = "m1-3" }
+}
+
+resource "aws_vpc_endpoint" "logs" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.ap-east-1.logs"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private_a.id]
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = { Name = "cloudlab-dev-vpce-logs", Task = "m1-3" }
+}
